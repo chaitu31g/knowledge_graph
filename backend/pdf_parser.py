@@ -13,14 +13,14 @@ from model_loader import run_inference
 
 # Prompt engineering for datasheet parsing
 TABLE_PROMPT = (
-    "You are a precision semiconductor datasheet parser. "
+    "You are a precision engineering datasheet parser. "
     "Extract ALL technical data from this page including:\n"
-    "- Electrical characteristics tables (with Parameter, Symbol, Min, Typ, Max, Unit columns)\n"
-    "- Schematic block diagrams and their descriptions\n"
-    "- Pin descriptions and configurations\n"
-    "Output in clean Markdown. Use $LaTeX$ notation for all parameter symbols "
-    "(e.g. $V_{GS(th)}$, $I_D$, $R_{DS(on)}$). "
-    "If no technical data is present on this page, output: [NO_DATA]"
+    "- ALL tables (specifications, dimensions, characteristics)\n"
+    "- Features, descriptions, and applications\n"
+    "- Diagrams and package outlines (describe what they show)\n"
+    "Output in clean Markdown. Represent all tables accurately using Markdown table syntax. "
+    "Use $LaTeX$ for any mathematical symbols or units (e.g. $10 \\Omega$, $ppm/^\\circ C$). "
+    "If the page is entirely blank or contains absolutely no technical information, output exactly: [NO_DATA]"
 )
 
 CHAT_PROMPT_TEMPLATE = (
