@@ -1,10 +1,15 @@
 import os
 import torch
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
-from qwen_vl_utils import process_vision_info
+
+# ── Prevent HuggingFace network timeouts in background threads ──
+os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "120"
+os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
 
 # ── Memory optimisation: prevent fragmentation on T4/L4 ───────
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
+from qwen_vl_utils import process_vision_info
 
 _model = None
 _processor = None
