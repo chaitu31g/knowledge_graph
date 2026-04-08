@@ -76,7 +76,8 @@ def run_inference(messages: list, max_new_tokens: int = 2048) -> str:
         output_ids = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            do_sample=False,    # greedy decoding — faster and less memory
+            do_sample=False,     # greedy — fastest and most deterministic
+            temperature=None,    # explicitly unset: suppresses the 'invalid flag' warning
         )
 
     # Free input tensors immediately to reclaim VRAM
