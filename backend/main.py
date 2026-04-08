@@ -86,39 +86,83 @@ async def health():
     return {"status": "ok", "model": "Qwen2.5-VL-3B-Instruct (4-bit)"}
 
 
-@app.post("/process", response_model=ProcessResponse)
+import asyncio, json, torch
+from fastapi.responses import StreamingResponse
+from pdf_parser import pdf_to_images, extract_text_from_page, extract_specs, generate_chat_response
+
+def _sse(data: dict) -> str:
+    """Format a dict as a single SSE message."""
+    return f"data: {json.dumps(data)}\n\n"
+
+
+@app.post("/process")
 async def process_pdf(file: UploadFile = File(...)):
     """
-    Accept a PDF, parse it page-by-page with the vision model,
-    store chunks in ChromaDB, and extract sidebar specs.
+    Stream real-time progress events (SSE) while parsing the PDF.
+    Each yielded line is a JSON object with { type, message, ... }.
     """
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     pdf_bytes = await file.read()
+    filename  = file.filename
+    loop      = asyncio.get_event_loop()
 
-    # Wipe previous document before loading a new one
-    clear_collection()
+    async def progress_stream():
+        try:
+            # ── Step 0: clear previous doc ────────────────────
+            await loop.run_in_executor(None, clear_collection)
 
-    print(f"[/process] Received '{file.filename}' ({len(pdf_bytes) / 1024:.1f} KB)")
+            # ── Step 1: PDF → images ───────────────────────────
+            yield _sse({"type": "progress", "step": "convert",
+                        "message": f"Converting '{filename}' to page images..."})
+            images = await loop.run_in_executor(None, pdf_to_images, pdf_bytes)
+            yield _sse({"type": "progress", "step": "convert",
+                        "message": f"Found {len(images)} pages. Starting vision extraction..."})
 
-    # 1. Vision extraction
-    full_text = extract_all_pages(pdf_bytes)
-    if not full_text.strip():
-        raise HTTPException(status_code=422, detail="No extractable content found in PDF.")
+            # ── Step 2: vision extraction per page ────────────
+            pages_text = []
+            for i, img in enumerate(images):
+                yield _sse({"type": "progress", "step": "extract",
+                            "message": f"Extracting data from page {i+1} of {len(images)}...",
+                            "page": i + 1, "total": len(images)})
+                text = await loop.run_in_executor(None, extract_text_from_page, img)
+                if text:
+                    pages_text.append(f"### Page {i + 1}\n\n{text}")
+                await loop.run_in_executor(None, torch.cuda.empty_cache)
 
-    state.latest_full_text = full_text
+            full_text = "\n\n---\n\n".join(pages_text)
+            if not full_text.strip():
+                yield _sse({"type": "error", "message": "No extractable content found in PDF."})
+                return
 
-    # 2. Store in ChromaDB
-    n_chunks = store_document(full_text, source=file.filename)
+            state.latest_full_text = full_text
 
-    # 3. Extract sidebar specs
-    state.latest_specs = extract_specs(full_text)
+            # ── Step 3: chunk + index ──────────────────────────
+            yield _sse({"type": "progress", "step": "chunk",
+                        "message": "Chunking text and building vector index..."})
+            n_chunks = await loop.run_in_executor(None, store_document, full_text, filename)
+            yield _sse({"type": "progress", "step": "chunk",
+                        "message": f"Indexed {n_chunks} chunks into ChromaDB."})
 
-    return ProcessResponse(
-        status="success",
-        message=f"Parsed and indexed '{file.filename}'.",
-        chunks_stored=n_chunks,
+            # ── Step 4: spec extraction ────────────────────────
+            yield _sse({"type": "progress", "step": "specs",
+                        "message": "Extracting component specifications for sidebar..."})
+            specs = await loop.run_in_executor(None, extract_specs, full_text)
+            state.latest_specs = specs
+
+            # ── Done ───────────────────────────────────────────
+            yield _sse({"type": "done",
+                        "message": f"✅ Processed {len(images)} pages · {n_chunks} chunks indexed.",
+                        "specs": specs})
+
+        except Exception as e:
+            yield _sse({"type": "error", "message": f"Processing failed: {str(e)}"})
+
+    return StreamingResponse(
+        progress_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
