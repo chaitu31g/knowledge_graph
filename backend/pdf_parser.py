@@ -1,5 +1,8 @@
 import sys, os
-_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+try:
+    _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _BACKEND_DIR = os.getcwd()
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 

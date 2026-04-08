@@ -7,7 +7,12 @@ Run via the Colab notebook cells — do not run this directly.
 # Ensures pdf_parser, rag_engine, model_loader are always found
 # regardless of which directory Python was launched from.
 import sys, os
-_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+try:
+    _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    # Running inside a Jupyter/Colab cell — __file__ is not defined.
+    # Cell 0 sets os.chdir() to the backend dir, so getcwd() gives the right path.
+    _BACKEND_DIR = os.getcwd()
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 # ──────────────────────────────────────────────────────────────
