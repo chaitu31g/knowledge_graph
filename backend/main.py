@@ -22,22 +22,18 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from pdf_parser import extract_all_pages, generate_chat_response, extract_specs
-from rag_engine import store_document, retrieve_context, clear_collection, _get_embedder
-from model_loader import load_model
-
-# ── Lifespan: pre-load models at startup ──────────────────────
+from server_utils import ensure_models_loaded, release_lock, register_shutdown_handlers
+from pdf_parser import generate_chat_response, extract_specs
+from rag_engine import store_document, retrieve_context, clear_collection
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Runs on server startup — loads all heavy models before serving requests."""
-    print("[startup] Pre-loading Qwen2.5-VL-3B into GPU...")
-    load_model()                  # loads vision LLM + processor
-    print("[startup] Pre-loading BGE-M3 embedding model...")
-    _get_embedder()               # loads sentence-transformers model
-    print("[startup] ✅ All models ready. Server is now accepting requests.")
-    yield                         # server runs here
-    print("[shutdown] Server shutting down.")
+    """Pre-load models at startup and clean up on shutdown."""
+    ensure_models_loaded()           # thread-safe singleton — safe to call multiple times
+    register_shutdown_handlers(extra_cleanup=release_lock)
+    yield
+    release_lock()
+    print("[shutdown] Server stopped cleanly ✓")
 
 # ── App Setup ─────────────────────────────────────────────────
 
