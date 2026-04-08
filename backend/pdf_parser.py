@@ -1,3 +1,8 @@
+import sys, os
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
 from pdf2image import convert_from_bytes
 from model_loader import run_inference
 from PIL import Image

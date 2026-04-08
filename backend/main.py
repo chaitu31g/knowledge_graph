@@ -3,11 +3,18 @@ CircuitAI FastAPI Backend
 Run via the Colab notebook cells — do not run this directly.
 """
 
+# ── Path bootstrap (MUST be first) ────────────────────────────
+# Ensures pdf_parser, rag_engine, model_loader are always found
+# regardless of which directory Python was launched from.
+import sys, os
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+# ──────────────────────────────────────────────────────────────
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import uvicorn
-import threading
 
 from pdf_parser import extract_all_pages, generate_chat_response, extract_specs
 from rag_engine import store_document, retrieve_context, clear_collection
