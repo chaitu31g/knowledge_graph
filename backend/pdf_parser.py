@@ -43,20 +43,27 @@ SPEC_EXTRACTION_PROMPT = (
 )
 
 
-def pdf_to_images(pdf_bytes: bytes, max_pages: int = 6, dpi: int = 150) -> list:
+def pdf_to_images(pdf_bytes: bytes, max_pages: int = 6, dpi: int = 96) -> list:
     """
     Convert PDF bytes to a list of PIL Images using pypdfium2.
     No poppler / system dependency required.
+    DPI=96 keeps images small enough for T4 VRAM budget.
     """
     doc = pdfium.PdfDocument(pdf_bytes)
     images = []
     n_pages = min(len(doc), max_pages)
-    scale = dpi / 72  # pypdfium2 renders at 72 DPI base; scale up to target DPI
+    scale = dpi / 72  # pypdfium2 base is 72 DPI
 
     for i in range(n_pages):
         page = doc[i]
         bitmap = page.render(scale=scale, rotation=0)
         pil_image = bitmap.to_pil()
+
+        # Cap the largest dimension at 1024px to stay safely within VRAM
+        max_dim = 1024
+        if max(pil_image.size) > max_dim:
+            pil_image.thumbnail((max_dim, max_dim), Image.LANCZOS)
+
         images.append(pil_image)
 
     doc.close()
@@ -80,6 +87,7 @@ def extract_text_from_page(image: Image.Image) -> str:
 
 def extract_all_pages(pdf_bytes: bytes) -> str:
     """Process all pages and concatenate the extracted Markdown."""
+    import torch
     images = pdf_to_images(pdf_bytes)
     pages_text = []
     for i, img in enumerate(images):
@@ -87,6 +95,8 @@ def extract_all_pages(pdf_bytes: bytes) -> str:
         text = extract_text_from_page(img)
         if text:
             pages_text.append(f"### Page {i + 1}\n\n{text}")
+        # Free VRAM between pages to avoid accumulation
+        torch.cuda.empty_cache()
     return "\n\n---\n\n".join(pages_text)
 
 

@@ -1,11 +1,21 @@
+import os
 import torch
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
+
+# ── Memory optimisation: prevent fragmentation on T4/L4 ───────
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 _model = None
 _processor = None
 
 MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
+
+# Pixel caps for the vision encoder.
+# 512 * 28 * 28 = ~401k px — safe upper bound for T4 16 GB with 4-bit model
+MIN_PIXELS = 256 * 28 * 28
+MAX_PIXELS = 512 * 28 * 28
+
 
 def load_model():
     global _model, _processor
@@ -24,15 +34,26 @@ def load_model():
         MODEL_ID,
         quantization_config=bnb_config,
         device_map="auto",
-        torch_dtype="auto",
+        torch_dtype=torch.bfloat16,
+        attn_implementation="eager",   # avoids SDPA spikes in vision encoder
     )
-    _processor = AutoProcessor.from_pretrained(MODEL_ID)
+    _model.eval()
+
+    # min_pixels / max_pixels are enforced by the processor before tokenisation
+    _processor = AutoProcessor.from_pretrained(
+        MODEL_ID,
+        min_pixels=MIN_PIXELS,
+        max_pixels=MAX_PIXELS,
+    )
     print("[model_loader] Model loaded successfully.")
     return _model, _processor
 
 
-def run_inference(messages: list, max_new_tokens: int = 4096) -> str:
+def run_inference(messages: list, max_new_tokens: int = 2048) -> str:
+    """Run a single vision or text inference call with memory guards."""
     model, processor = load_model()
+
+    torch.cuda.empty_cache()  # free fragmented cache before each call
 
     text_input = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
@@ -47,14 +68,25 @@ def run_inference(messages: list, max_new_tokens: int = 4096) -> str:
         return_tensors="pt",
     ).to("cuda")
 
-    with torch.no_grad():
-        generated_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
+    input_ids_len = inputs["input_ids"].shape[1]
 
-    # Strip the prompt tokens from the output
-    trimmed = [
-        out_ids[len(in_ids):]
-        for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-    ]
-    return processor.batch_decode(
-        trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,    # greedy decoding — faster and less memory
+        )
+
+    # Free input tensors immediately to reclaim VRAM
+    del inputs
+    torch.cuda.empty_cache()
+
+    # Slice off the prompt tokens — only decode the new tokens
+    new_tokens = output_ids[:, input_ids_len:]
+    response = processor.batch_decode(
+        new_tokens,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
     )[0]
+
+    return response.strip()
