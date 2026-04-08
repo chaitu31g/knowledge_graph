@@ -37,9 +37,9 @@ def _get_chroma():
 def _get_embedder():
     global _embedder
     if _embedder is None:
-        print("[rag] Loading BGE-M3 via sentence-transformers...")
-        # sentence-transformers loads BGE-M3 identically; fp16 on GPU is automatic
-        _embedder = SentenceTransformer(EMBED_MODEL, device="cuda")
+        print("[rag] Loading BGE-M3 via sentence-transformers (CPU)...")
+        # Run on CPU — Qwen needs all 16GB of T4 VRAM for inference
+        _embedder = SentenceTransformer(EMBED_MODEL, device="cpu")
     return _embedder
 
 

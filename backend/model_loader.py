@@ -35,7 +35,7 @@ def load_model():
         quantization_config=bnb_config,
         device_map="auto",
         torch_dtype=torch.bfloat16,
-        attn_implementation="eager",   # avoids SDPA spikes in vision encoder
+        low_cpu_mem_usage=True,        # ← loads layer-by-layer, NOT full model to RAM first
     )
     _model.eval()
 
